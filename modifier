@@ -1,0 +1,48 @@
+#!/bin/bash
+
+# Directory where LXC container configuration files are stored
+CONF_DIR="/etc/pve/lxc"
+
+# List LXC container configuration files
+LXC_FILES=($(ls $CONF_DIR/*.conf))
+
+# Prompt the user to choose a container
+echo "Available LXC containers:"
+for ((i=0; i<${#LXC_FILES[@]}; i++)); do
+  echo "[$i] ${LXC_FILES[i]}"
+done
+
+read -p "Enter the number of the LXC container you want to modify (0 to ${#LXC_FILES[@]}): " CHOICE
+
+# Check if the user's choice is within a valid range
+if [ $CHOICE -ge 0 ] && [ $CHOICE -lt ${#LXC_FILES[@]} ]; then
+  CONTAINER_CONF="${LXC_FILES[CHOICE]}"
+  
+  # Ask the user if they want to shut down the container
+  read -p "Do you want to shut down the selected container (y/n)? " SHUT_DOWN_CONTAINER
+  if [ "$SHUT_DOWN_CONTAINER" = "y" ]; then
+    pct shutdown $(basename "$CONTAINER_CONF")
+    echo "Container has been shut down."
+  fi
+
+  # Append the specified entries to the chosen configuration file
+  cat <<EOL >> "$CONTAINER_CONF"
+# Additional entries for container modifications
+lxc.mount.entry: /dev/dri/renderD128 dev/dri/renderD128 none bind,optional,create=file 0 0
+lxc.mount.entry: /dev/dri/renderD129 dev/dri/renderD129 none bind,optional,create=file 0 0
+lxc.mount.entry: /dev/apex_0         dev/apex_0         none bind,optional,create=file 0 0
+EOL
+
+  echo "Entries added to $CONTAINER_CONF."
+
+  # Ask the user if they want to start the container
+  read -p "Do you want to start the container (y/n)? " START_CONTAINER
+  if [ "$START_CONTAINER" = "y" ]; then
+    pct start $(basename "$CONTAINER_CONF")
+    echo "Container has been started."
+  else
+    echo "You can manually start the container when ready."
+  fi
+else
+  echo "Invalid choice. Please select a number within the valid range."
+fi
