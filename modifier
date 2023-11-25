@@ -1,48 +1,77 @@
 #!/bin/bash
 
-# Directory where LXC container configuration files are stored
-CONF_DIR="/etc/pve/lxc"
+# Function to list available options and prompt user to choose
+select_option() {
+    options=("$@")
+    select opt in "${options[@]}"; do
+        if [[ " ${options[@]} " =~ " ${opt} " ]]; then
+            echo "$opt"
+            break
+        else
+            echo "Invalid option. Please try again."
+        fi
+    done
+}
 
-# List LXC container configuration files
-LXC_FILES=($(ls $CONF_DIR/*.conf))
-
-# Prompt the user to choose a container
-echo "Available LXC containers:"
-for ((i=0; i<${#LXC_FILES[@]}; i++)); do
-  echo "[$i] ${LXC_FILES[i]}"
+# Search for renderD drivers in /etc/dri/ and /etc/
+renderD_drivers=($(find /etc/dri/ -type f -name 'renderD*'))
+echo "Found renderD drivers:"
+select renderD_choice in "${renderD_drivers[@]}" "All"; do
+    if [[ "$renderD_choice" == "All" ]]; then
+        selected_renderD_drivers="${renderD_drivers[@]}"
+        break
+    elif [[ -n "$renderD_choice" ]]; then
+        selected_renderD_drivers="$renderD_choice"
+        break
+    else
+        echo "Invalid option. Please try again."
+    fi
 done
 
-read -p "Enter the number of the LXC container you want to modify (0 to ${#LXC_FILES[@]}): " CHOICE
+# Search for apex_0 in /etc/
+apex_0_drivers=($(find /etc/ -type f -name 'apex_0'))
+echo "Found apex_0 drivers:"
+select apex_0_choice in "${apex_0_drivers[@]}" "All"; do
+    if [[ "$apex_0_choice" == "All" ]]; then
+        selected_apex_0_drivers="${apex_0_drivers[@]}"
+        break
+    elif [[ -n "$apex_0_choice" ]]; then
+        selected_apex_0_drivers="$apex_0_choice"
+        break
+    else
+        echo "Invalid option. Please try again."
+    fi
+done
 
-# Check if the user's choice is within a valid range
-if [ $CHOICE -ge 0 ] && [ $CHOICE -lt ${#LXC_FILES[@]} ]; then
-  CONTAINER_CONF="${LXC_FILES[CHOICE]}"
-  
-  # Ask the user if they want to shut down the container
-  read -p "Do you want to shut down the selected container (y/n)? " SHUT_DOWN_CONTAINER
-  if [ "$SHUT_DOWN_CONTAINER" = "y" ]; then
-    pct shutdown $(basename "$CONTAINER_CONF")
-    echo "Container has been shut down."
-  fi
+# List available .conf files in /etc/pve/lxc/
+lxc_configs=($(find /etc/pve/lxc/ -type f -name '*.conf'))
+echo "Found LXC configurations:"
+selected_lxc_config=$(select_option "${lxc_configs[@]}")
 
-  # Append the specified entries to the chosen configuration file
-  cat <<EOL >> "$CONTAINER_CONF"
-# Additional entries for container modifications
-lxc.mount.entry: /dev/dri/renderD128 dev/dri/renderD128 none bind,optional,create=file 0 0
-lxc.mount.entry: /dev/dri/renderD129 dev/dri/renderD129 none bind,optional,create=file 0 0
-lxc.mount.entry: /dev/apex_0         dev/apex_0         none bind,optional,create=file 0 0
-EOL
+# Ask user to choose an LXC container to update
+echo "Choose an LXC container to update:"
+selected_lxc_container=$(select_option $(pct list | awk 'NR>1 {print $1}'))
 
-  echo "Entries added to $CONTAINER_CONF."
-
-  # Ask the user if they want to start the container
-  read -p "Do you want to start the container (y/n)? " START_CONTAINER
-  if [ "$START_CONTAINER" = "y" ]; then
-    pct start $(basename "$CONTAINER_CONF")
-    echo "Container has been started."
-  else
-    echo "You can manually start the container when ready."
-  fi
-else
-  echo "Invalid choice. Please select a number within the valid range."
+# Check if the selected LXC container is running and stop it
+if pct status $selected_lxc_container | grep -q "running"; then
+    echo "Stopping the running LXC container $selected_lxc_container..."
+    pct stop $selected_lxc_container
 fi
+
+# Edit the chosen .conf file and add the necessary entries
+echo "Editing $selected_lxc_config..."
+for renderD_device in $selected_renderD_drivers; do
+    echo "lxc.mount.entry: $renderD_device dev/dri/$(basename $renderD_device) none bind,optional,create=file 0 0" >> $selected_lxc_config
+done
+
+for apex_0_device in $selected_apex_0_drivers; do
+    echo "lxc.mount.entry: $apex_0_device dev/apex_0 none bind,optional,create=file 0 0" >> $selected_lxc_config
+done
+
+# Ask user if they want to start the edited LXC container
+read -p "Do you want to start the LXC container $selected_lxc_container? (yes/no): " start_container
+if [ "$start_container" == "yes" ]; then
+    pct start $selected_lxc_container
+fi
+
+echo "Script completed. Thank you for using!"
